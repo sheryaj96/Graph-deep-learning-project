@@ -1,3 +1,5 @@
 # Graph-deep-learning-project
 
 In this repository we are trying to propose a new model to improve the Product Grapgh model proposed in https://arxiv.org/abs/1801.07455.
+
+in this paper the authors has tried to estimate the human skeleton pose using kinetic dataset. they used openpose to convert the videos to skeleto pose. and the in their paper they first feed input skeletons to a batch normalization layer to normalize data. The ST-GCN model is composed of 9 layers of spatial temporal graph convolution operators (ST-GCN units). The first three layers have 64 channels for output. The follow three layers have 128 channels for output. And the last three layers have 256 channels for output. These layers have 9 temporal kernel size. The Resnet mechanism is applied on each ST-GCN unit. And they randomly dropout the features at 0.5 probability after each STGCN unit to avoid overfitting. The strides of the 4-th and the 7-th temporal convolution layers are set to 2 as pooling layer. After that, a global pooling was performed on the resulting tensor to get a 256 dimension feature vector for each sequence. Finally, they feed them to a SoftMax classifier.
