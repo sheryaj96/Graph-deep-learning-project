@@ -12,35 +12,67 @@ DEVICE = 'cuda:0'
 
 
 class Spatial_Attention_layer(nn.Module):
-    '''
-    compute spatial attention scores
-    '''
-    def __init__(self, DEVICE, in_channels, num_of_vertices, num_of_timesteps):
+    r"""An implementation of the Spatial Attention Module (i.e compute spatial attention scores). For details see this paper:
+    `"Attention Based Spatial-Temporal Graph Convolutional Networks for Traffic Flow
+    Forecasting." <https://ojs.aaai.org/index.php/AAAI/article/view/3881>`_
+    
+    Args:
+        in_channels (int): Number of input features.
+        num_of_vertices (int): Number of vertices in the graph.
+        num_of_timesteps (int): Number of time lags.
+    """
+
+    def __init__(self, in_channels: int, num_of_vertices: int, num_of_timesteps: int):
         super(Spatial_Attention_layer, self).__init__()
-        self.W1 = nn.Parameter(torch.FloatTensor(num_of_timesteps).to(DEVICE))
-        self.W2 = nn.Parameter(torch.FloatTensor(in_channels, num_of_timesteps).to(DEVICE))
-        self.W3 = nn.Parameter(torch.FloatTensor(in_channels).to(DEVICE))
-        self.bs = nn.Parameter(torch.FloatTensor(1, num_of_vertices, num_of_vertices).to(DEVICE))
-        self.Vs = nn.Parameter(torch.FloatTensor(num_of_vertices, num_of_vertices).to(DEVICE))
 
+        self._W1 = nn.Parameter(torch.FloatTensor(num_of_timesteps))  #for example (12)
+        self._W2 = nn.Parameter(torch.FloatTensor(in_channels, num_of_timesteps)) #for example (1, 12)
+        self._W3 = nn.Parameter(torch.FloatTensor(in_channels)) #for example (1)
+        self._bs = nn.Parameter(torch.FloatTensor(1, num_of_vertices, num_of_vertices)) #for example (1,307, 307)
+        self._Vs = nn.Parameter(torch.FloatTensor(num_of_vertices, num_of_vertices)) #for example (307, 307)
 
-    def forward(self, x):
-        '''
-        :param x: (batch_size, N, F_in, T)
-        :return: (B,N,N)
-        '''
-        print(torch.matmul(x, self.W1))
-        lhs = torch.matmul(torch.matmul(x, self.W1), self.W2)  # (b,N,F,T)(T)->(b,N,F)(F,T)->(b,N,T)
+        self._reset_parameters()
 
-        rhs = torch.matmul(self.W3, x).transpose(-1, -2)  # (F)(b,N,F,T)->(b,N,T)->(b,T,N)
+    def _reset_parameters(self):
+        for p in self.parameters():
+            if p.dim() > 1:
+                nn.init.xavier_uniform_(p)
+            else:
+                nn.init.uniform_(p)
 
-        product = torch.matmul(lhs, rhs)  # (b,N,T)(b,T,N) -> (B, N, N)
+    def forward(self, X: torch.FloatTensor) -> torch.FloatTensor:
+        """
+        Making a forward pass of the spatial attention layer.
 
-        S = torch.matmul(self.Vs, torch.sigmoid(product + self.bs))  # (N,N)(B, N, N)->(B,N,N)
+        Arg types:
+            * **X** (PyTorch FloatTensor) - Node features for T time periods, with shape (B, N_nodes, F_in, T_in).
+
+        Return types:
+            * **S** (PyTorch FloatTensor) - Spatial attention score matrices, with shape (B, N_nodes, N_nodes).
+        """
+        # lhs = left hand side embedding;
+        # to calculcate it : 
+        # multiply with W1 (B, N, F_in, T)(T) -> (B,N,F_in)
+        # multiply with W2 (B,N,F_in)(F_in,T)->(B,N,T)
+        # for example (32, 307, 1, 12) * (12) -> (32, 307, 1) * (1, 12) -> (32, 307, 12) 
+        LHS = torch.matmul(torch.matmul(X, self._W1), self._W2)
         
-        S_normalized = F.softmax(S, dim=1)
-
-        return S_normalized
+        # rhs = right hand side embedding
+        # to calculcate it : 
+        # mutliple W3 with X (F)(B,N,F,T)->(B, N, T) 
+        # transpose  (B, N, T)  -> (B, T, N)
+        # for example (1)(32, 307, 1, 12) -> (32, 307, 12) -transpose-> (32, 12, 307)
+        RHS = torch.matmul(self._W3, X).transpose(-1, -2)
+        
+        # Then, we multiply LHS with RHS : 
+        # (B,N,T)(B,T, N)->(B,N,N)
+        # for example (32, 307, 12) * (32, 12, 307) -> (32, 307, 307) 
+        # Then multiply Vs(N,N) with the output
+        # (N,N)(B, N, N)->(B,N,N) (32, 307, 307)
+        # for example (307, 307) *  (32, 307, 307) ->   (32, 307, 307)
+        S = torch.matmul(self._Vs, torch.sigmoid(torch.matmul(LHS, RHS) + self._bs))
+        S = F.softmax(S, dim=1)
+        return S # (B,N,N) for example (32, 307, 307)
 
 
 class cheb_conv_withSAt(nn.Module):
@@ -97,39 +129,71 @@ class cheb_conv_withSAt(nn.Module):
 
 
 class Temporal_Attention_layer(nn.Module):
-    def __init__(self, DEVICE, in_channels, num_of_vertices, num_of_timesteps):
+    r"""An implementation of the Temporal Attention Module( i.e. compute temporal attention scores). For details see this paper:
+    `"Attention Based Spatial-Temporal Graph Convolutional Networks for Traffic Flow
+    Forecasting." <https://ojs.aaai.org/index.php/AAAI/article/view/3881>`_
+    
+    Args:
+        in_channels (int): Number of input features.
+        num_of_vertices (int): Number of vertices in the graph.
+        num_of_timesteps (int): Number of time lags.
+    """
+
+    def __init__(self, in_channels: int, num_of_vertices: int, num_of_timesteps: int):
         super(Temporal_Attention_layer, self).__init__()
-        self.U1 = nn.Parameter((torch.FloatTensor(num_of_vertices+1e-6)).to(DEVICE))
-        self.U2 = nn.Parameter(torch.FloatTensor(in_channels, num_of_vertices).to(DEVICE))
-        self.U3 = nn.Parameter(torch.FloatTensor(in_channels).to(DEVICE))
-        self.be = nn.Parameter(torch.FloatTensor(1, num_of_timesteps, num_of_timesteps).to(DEVICE))
-        self.Ve = nn.Parameter(torch.FloatTensor(num_of_timesteps, num_of_timesteps).to(DEVICE))
 
-    def forward(self, x):
-        '''
-        :param x: (batch_size, N, F_in, T)
-        :return: (B, T, T)
-        '''
-        _, num_of_vertices, num_of_features, num_of_timesteps = x.shape
+        self._U1 = nn.Parameter(torch.FloatTensor(num_of_vertices))  # for example 307
+        self._U2 = nn.Parameter(torch.FloatTensor(in_channels, num_of_vertices)) #for example (1, 307)
+        self._U3 = nn.Parameter(torch.FloatTensor(in_channels))  # for example (1)
+        self._be = nn.Parameter(
+            torch.FloatTensor(1, num_of_timesteps, num_of_timesteps)
+        ) # for example (1,12,12)
+        self._Ve = nn.Parameter(torch.FloatTensor(num_of_timesteps, num_of_timesteps))  #for example (12, 12)
 
-        lhs = torch.matmul(torch.matmul(x.permute(0, 3, 2, 1), self.U1), self.U2)
-        # x:(B, N, F_in, T) -> (B, T, F_in, N)
-        # (B, T, F_in, N)(N) -> (B,T,F_in)
-        # (B,T,F_in)(F_in,N)->(B,T,N)
+        self._reset_parameters()
 
-        rhs = torch.matmul(self.U3, x)  # (F)(B,N,F,T)->(B, N, T)
-        # print(x.shape)
-        # print(lhs.shape)
-        # print(rhs.shape)
-        product = torch.matmul(lhs, rhs)  # (B,T,N)(B,N,T)->(B,T,T)
-        # print(self.Ve.shape)
-        # print(product.shape)
-        # print(self.be.shape)
-        E = torch.matmul(self.Ve, torch.sigmoid(product + self.be))  # (B, T, T)
+    def _reset_parameters(self):
+        for p in self.parameters():
+            if p.dim() > 1:
+                nn.init.xavier_uniform_(p)
+            else:
+                nn.init.uniform_(p)
 
-        E_normalized = F.softmax(E, dim=1)
+    def forward(self, X: torch.FloatTensor) -> torch.FloatTensor:
+        """
+        Making a forward pass of the temporal attention layer.
 
-        return E_normalized
+        Arg types:
+            * **X** (PyTorch FloatTensor) - Node features for T time periods, with shape (B, N_nodes, F_in, T_in).
+
+        Return types:
+            * **E** (PyTorch FloatTensor) - Temporal attention score matrices, with shape (B, T_in, T_in).
+        """
+        # lhs = left hand side embedding;
+        # to calculcate it : 
+        # permute x:(B, N, F_in, T) -> (B, T, F_in, N)  
+        # multiply with U1 (B, T, F_in, N)(N) -> (B,T,F_in)
+        # multiply with U2 (B,T,F_in)(F_in,N)->(B,T,N)
+        # for example (32, 307, 1, 12) -premute-> (32, 12, 1, 307) * (307) -> (32, 12, 1) * (1, 307) -> (32, 12, 307) 
+        LHS = torch.matmul(torch.matmul(X.permute(0, 3, 2, 1), self._U1), self._U2) # (32, 12, 307) 
+        
+        
+        #rhs = right hand side embedding
+        # to calculcate it : 
+        # mutliple U3 with X (F)(B,N,F,T)->(B, N, T)
+        # for example (1)(32, 307, 1, 12) -> (32, 307, 12)
+        RHS = torch.matmul(self._U3, X) # (32, 307, 12)
+        
+        # Them we multiply LHS with RHS : 
+        # (B,T,N)(B,N,T)->(B,T,T)
+        # for example (32, 12, 307) * (32, 307, 12) -> (32, 12, 12) 
+        # Then multiply Ve(T,T) with the output
+        # (T,T)(B, T, T)->(B,T,T)
+        # for example (12, 12) *  (32, 12, 12) ->   (32, 12, 12)
+        E = torch.matmul(self._Ve, torch.sigmoid(torch.matmul(LHS, RHS) + self._be))
+        E = F.softmax(E, dim=1) #  (B, T, T)  for example (32, 12, 12)
+        return E
+
         
 def scaled_Laplacian(W):
     '''
@@ -522,11 +586,13 @@ class ast_gcn(nn.Module):
         padding = ((kernel_size[0] - 1) // 2, 0)
         
         self.cheb_conv_SAt = cheb_conv_withSAt(K, cheb_polynomials, in_channels, out_channels)
-        self.TAt = Temporal_Attention_layer(DEVICE, in_channels, num_of_vertices, num_of_timesteps)
-        self.SAt = Spatial_Attention_layer(DEVICE, in_channels, num_of_vertices, num_of_timesteps)
+        self.TAt = Temporal_Attention_layer(in_channels, num_of_vertices, num_of_timesteps)
+        self.SAt = Spatial_Attention_layer(in_channels, num_of_vertices, num_of_timesteps)
         self.time_conv = nn.Conv2d(out_channels, out_channels, kernel_size=(1, 3), stride=(1, stride), padding=(0, 1))
+        self.time_bn = nn.BatchNorm2d(out_channels)
+        self.do = nn.Dropout(0.5, inplace=True)
         self.residual_conv = nn.Conv2d(in_channels, out_channels, kernel_size=(1, 1), stride=(1, stride))
-        #self.ln = nn.LayerNorm(out_channels)
+        self.ln = nn.LayerNorm(out_channels)
         self.relu = nn.ReLU(inplace=True)
         
     def forward(self, x):
@@ -545,14 +611,16 @@ class ast_gcn(nn.Module):
         
         # cheb gcn
         spatial_gcn = self.cheb_conv_SAt(x, spatial_At)  # (b,N,F,T)
+
         # spatial_gcn = self.cheb_conv(x)
         # convolution along the time axis
         time_conv_output = self.time_conv(spatial_gcn.permute(0, 2, 1, 3).type(torch.FloatTensor))  # (b,N,F,T)->(b,F,N,T) 
+        #time_conv_output = self.time_bn(time_conv_output)
         # residual shortcut
         x_residual = self.residual_conv(x.permute(0, 2, 1, 3))  # (b,N,F,T)->(b,F,N,T)
+        #x_residual = self.ln(F.relu(x_residual + time_conv_output).permute(0, 3, 2, 1)).permute(0, 2, 3, 1)
         x_residual = F.relu(x_residual + time_conv_output).permute(0, 3, 2, 1)
         x_residual = x_residual.permute(0, 2, 3, 1)
-        
         # (b,F,N,T)->(b,T,N,F) -ln-> (b,T,N,F)->(b,N,F,T)
 
         return x_residual
