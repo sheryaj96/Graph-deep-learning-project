@@ -13,7 +13,7 @@ test_feeder_args:
   label_path: ./data/Kinetics/kinetics-skeleton/val_label.pkl
 
 # model
-model: net.st_gcn.AModel
+model: net.st_gcn.Model
 model_args:
   in_channels: 3
   num_class: 400
@@ -30,9 +30,9 @@ batch_size: 16
 test_batch_size: 16
 
 #optim
-base_lr: 0.1
+base_lr: 0.01
 step: [20, 30, 40, 50]
-num_epoch: 10
+num_epoch: 4
 
 
 

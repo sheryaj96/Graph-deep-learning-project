@@ -1,4 +1,4 @@
-weights: ./models/kinetics-st_gcn.pt
+weights: ./work_dir/recognition/kinetics_skeleton/ST_GCN/epoch4_model.pt
 
 # feeder
 feeder: feeder.feeder.Feeder
@@ -11,6 +11,8 @@ model: net.st_gcn.Model
 model_args:
   in_channels: 3
   num_class: 400
+  num_of_timesteps: 150
+  num_of_vertices: 18
   edge_importance_weighting: True
   graph_args:
     layout: 'openpose'
